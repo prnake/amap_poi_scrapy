@@ -4,3 +4,18 @@
 ## 致谢
 
 项目部分代码参考自  [liujiao111/poi](https://github.com/liujiao111/poi)，并在其基础上实现了并发和区域细分。
+
+## 启动
+
+开发环境为 Python 3.9.5，理论兼容 Python 3.6+
+
+```bash
+# install
+pip install -r requirements.txt
+
+# run
+python app.py
+
+# help
+python app.py -h
+```
