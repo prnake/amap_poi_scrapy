@@ -9,8 +9,9 @@ from threading import Thread, Lock
 from queue import Queue
 from urllib.parse import quote
 from urllib import request
-import pandas as pd
+import pandas
 from transCoordinateSystem import gcj02_to_wgs84, gcj02_to_bd09
+from area_code import area_code
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-v', '--verbose', help="打印更多的信息", action="store_true")
@@ -124,7 +125,7 @@ def write_to_csv(poilist, file_name):
         data_csv['cityname'], data_csv['business_area'], data_csv['type'] = \
         lons, lats, names, addresss, pnames, citynames, business_areas, types
 
-    df = pd.DataFrame(data_csv)
+    df = pandas.DataFrame(data_csv)
 
     file_path = 'data' + os.sep + file_name + os.sep + file_name + ".csv"
 
@@ -261,9 +262,7 @@ def get_scrapy_list():
     global keywords,types
     area_list = []
     if "全国" in city:
-        with open("areas.json", "r") as f:
-            areas = json.load(f)
-        for province in areas:
+        for province in area_code:
             for ct in province["cities"]:
                 if len(ct["districts"]) > 0:
                     for dt in ct["districts"]:
@@ -292,8 +291,8 @@ def get_scrapy_list():
     if args.verbose:
         print(scrapy_list)
 
-    with open(f"{folder_path}scrapy_list.json", "w") as f:
-        json.dump(scrapy_list, f)
+    with open(f"{folder_path}scrapy_list.json", "w", encoding='utf-8') as f:
+        json.dump(scrapy_list, f, ensure_ascii=False)
 
 
 def queue_scrapy(q):
@@ -309,10 +308,10 @@ def queue_scrapy(q):
         all_pois_write_count += 1
         scrapy_id.append(id)
         if all_pois_write_count % 100 ==0:
-            with open(f"{folder_path}results.json", "w") as f:
-                json.dump(all_pois, f)
-            with open(f"{folder_path}scrapy_id.json", "w") as f:
-                json.dump(scrapy_id, f)
+            with open(f"{folder_path}results.json", "w", encoding='utf-8') as f:
+                json.dump(all_pois, f, ensure_ascii=False)
+            with open(f"{folder_path}scrapy_id.json", "w", encoding='utf-8') as f:
+                json.dump(scrapy_id, f, ensure_ascii=False)
             print("当前进度:", f"{all_pois_write_count}/{all_pois_count}")
         all_pois_lock.release()
 
@@ -337,13 +336,13 @@ if __name__ == "__main__":
             config["types"] = input("输入分类代码或汉字:")
         config["coord"] = int(
             input("选择输出数据坐标系,1为高德GCJ20坐标系，2WGS84坐标系，3百度BD09坐标系（推荐2）:"))
-        with open("config.json", "w") as f:
+        with open("config.json", "w", encoding='utf-8') as f:
             config = json.dump(config, f, sort_keys=True,
-                               indent=4, separators=(',', ':'))
+                               indent=4, separators=(',', ':'), ensure_ascii=False)
             print("配置已写入 config.json")
 
     
-    with open("config.json", "r") as f:
+    with open("config.json", "r", encoding='utf-8') as f:
             config = json.load(f)
 
     thread_num = int(config["thread_num"])
@@ -362,23 +361,26 @@ if __name__ == "__main__":
     if os.path.exists(folder_path) is False:
         os.makedirs(folder_path)
 
+    print("配置读取成功")
+
     if os.path.exists(f"{folder_path}scrapy_list.json"):
         if input(f"{folder_path}scrapy_list.json 文件存在，是否继续上一次查询(Y/N)?") != "Y":
             get_scrapy_list()
         else:
             if os.path.exists(f"{folder_path}results.json"):
-                with open(f"{folder_path}results.json", "r") as f:
+                with open(f"{folder_path}results.json", "r", encoding='utf-8') as f:
                     all_pois = json.load(f)
             if os.path.exists(f"{folder_path}scrapy_id.json"):
-                with open(f"{folder_path}scrapy_id.json", "r") as f:
+                with open(f"{folder_path}scrapy_id.json", "r", encoding='utf-8') as f:
                     scrapy_id = json.load(f)
     else:
+        print("需要爬取的url中，预计需要2分钟")
         get_scrapy_list()
     
     print("查询的地区:", city)
     print("查询的关键词:", keywords)
     
-    with open(f"{folder_path}scrapy_list.json", "r") as f:
+    with open(f"{folder_path}scrapy_list.json", "r", encoding='utf-8') as f:
         scrapy_list = json.load(f)
     
     q = Queue()
@@ -395,6 +397,8 @@ if __name__ == "__main__":
     
     print("总数量约"+str(num_cnt), "预计请求"+str(req_cnt)+"次", "预计需要"+str(round(req_cnt/thread_num/60,1))+"分钟")
 
+    print("开始查询")
+
     threads = [Thread(target=queue_scrapy, args=(q,))
                for _ in range(thread_num)]
     
@@ -407,3 +411,4 @@ if __name__ == "__main__":
 
     print("数据汇总，总数为:", len(all_pois))
     print("文件保存至", file_path)
+    input("按下回车结束程序...")
