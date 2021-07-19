@@ -32,7 +32,7 @@ amap_district_url = "https://restapi.amap.com/v3/config/district?subdistrict=2&e
 def request_with_key(url):
     global amap_web_key
     amap_key_lock.acquire()
-    req_url = url.format(amap_web_key)
+    req_url = url.format(amap_web_key[0])
     amap_key_lock.release()
     if args.verbose:
         print('请求url:', req_url)
@@ -44,7 +44,7 @@ def request_with_key(url):
         print(data)
         if int(data["infocode"]) in [10001, 10044]:
             amap_key_lock.acquire()
-            req_url = url.format(amap_web_key)
+            req_url = url.format(amap_web_key[0])
             if args.verbose:
                 print('请求url:', req_url)
             with request.urlopen(req_url) as f:
@@ -52,11 +52,15 @@ def request_with_key(url):
                 data = data.decode('utf-8')
             data = json.loads(data)
             if int(data["infocode"]) in [10001,10044]:
-                amap_web_key = input("已超出使用额度或密钥不正确，请输入新Key：")
-                req_url = url.format(amap_web_key)
+                amap_web_key = amap_web_key[1:]
+                if len(amap_web_key) == 0:
+                    amap_web_key.append(input("已超出使用额度或密钥不正确，请输入新Key："))
+                else:
+                    print("已超出使用额度或密钥不正确，新Key自动替换中")
+                req_url = url.format(amap_web_key[0])
             amap_key_lock.release()
         else:
-            print("请求被拒绝，可能触发QPS限制，5s后重试")
+            print("请求被拒绝，可能触发QPS限制，程序将在5s后重试（出现少量本提示属于正常现象）")
             time.sleep(5)
             if args.verbose:
                 print('请求url:', req_url)
@@ -64,8 +68,6 @@ def request_with_key(url):
                 data = f.read()
                 data = data.decode('utf-8')
             data = json.loads(data)
-        
-    
     return data
 
 # 根据城市名称和分类关键字获取poi数据
@@ -85,8 +87,6 @@ def getpois(url):
     return poilist
 
 # 数据写入csv文件中
-
-
 def write_to_csv(poilist, file_name):
     data_csv = {}
     lons, lats, names, addresss, pnames, citynames, business_areas, types = [
@@ -242,14 +242,11 @@ def queue_get_scrapy_list(q, scrapy_list,scrapy_list_lock):
             pos_url = amap_pos_poly_url.format(
                 "{}", quote(keywords), "{}", "{}")
             pos_scrapy = gen_pos_scrapy(pos_url, area)
+            scrapy_list_lock.acquire()
             if pos_scrapy:
-                scrapy_list_lock.acquire()
                 scrapy_list.extend(pos_scrapy)
-                scrapy_list_lock.release()
-            else:
-                scrapy_list_lock.acquire()
-                scrapy_list.append([area, url, count])
-                scrapy_list_lock.release()
+            scrapy_list.append([area, url, count])
+            scrapy_list_lock.release()
         elif count > 0:
             scrapy_list_lock.acquire()
             scrapy_list.append([area, url, count])
@@ -279,7 +276,7 @@ def get_scrapy_list():
 
     for area in area_list:
         area_q.put(area)
-    
+
     area_threads = [Thread(target=queue_get_scrapy_list, args=(area_q, scrapy_list, scrapy_list_lock,))
                for _ in range(thread_num)]
 
@@ -287,7 +284,7 @@ def get_scrapy_list():
         thread.start()
     for thread in area_threads:
         thread.join()
-    
+
     if args.verbose:
         print(scrapy_list)
 
@@ -324,8 +321,16 @@ if __name__ == "__main__":
         print("配置创建中")
         config = {}
         config["thread_num"] = int(input("并发线程数（推荐5-10，高德个人开发者QPS为50）:"))
-        config["amap_web_key"] = input("高德开发者key:")
-        config["city"] = input("输入城市，多个请用\",\"分隔，完整查询请输入\"全国\":").split(",")
+        config["amap_web_key"] = input("高德开发者key，多个请用\",\"分隔:")
+        if "，" in config["amap_web_key"]:
+            config["amap_web_key"] = config["amap_web_key"].split("，")
+        else:
+            config["amap_web_key"] = config["amap_web_key"].split(",")
+        config["city"] = input("输入城市，多个请用\",\"分隔，完整查询请输入\"全国\":")
+        if "，" in config["city"]:
+            config["city"] = config["city"].split("，")
+        else:
+            config["city"] = config["city"].split(",")
         url_type = int(input("基于关键词查询请输入0，基于POI分类编码查询请输入1:"))
         if url_type == 0:
             config["keywords"] = input(
@@ -341,7 +346,7 @@ if __name__ == "__main__":
                                indent=4, separators=(',', ':'), ensure_ascii=False)
             print("配置已写入 config.json")
 
-    
+
     with open("config.json", "r", encoding='utf-8') as f:
             config = json.load(f)
 
@@ -376,13 +381,13 @@ if __name__ == "__main__":
     else:
         print("搜索需要爬取的url中，预计需要2分钟")
         get_scrapy_list()
-    
+
     print("查询的地区:", city)
     print("查询的关键词:", keywords)
-    
+
     with open(f"{folder_path}scrapy_list.json", "r", encoding='utf-8') as f:
         scrapy_list = json.load(f)
-    
+
     q = Queue()
 
     id, num_cnt, req_cnt = 0, 0, 0
@@ -392,23 +397,24 @@ if __name__ == "__main__":
             req_cnt += count//25
             q.put([id,url])
         id += 1
-    
+
     all_pois_count = q.qsize()
-    
+
     print("总数量约"+str(num_cnt), "预计请求"+str(req_cnt)+"次", "预计需要"+str(round(req_cnt/thread_num/60,1))+"分钟")
 
     print("开始查询")
 
     threads = [Thread(target=queue_scrapy, args=(q,))
                for _ in range(thread_num)]
-    
+
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
-        
+
     file_path = write_to_csv(all_pois, file_name)
 
-    print("数据汇总，总数为:", len(all_pois))
+    print("未去重的数据总数为:", len(all_pois))
     print("文件保存至", file_path)
     input("按下回车结束程序...")
+
