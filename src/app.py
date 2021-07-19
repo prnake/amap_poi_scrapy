@@ -374,7 +374,7 @@ if __name__ == "__main__":
                 with open(f"{folder_path}scrapy_id.json", "r", encoding='utf-8') as f:
                     scrapy_id = json.load(f)
     else:
-        print("需要爬取的url中，预计需要2分钟")
+        print("搜索需要爬取的url中，预计需要2分钟")
         get_scrapy_list()
     
     print("查询的地区:", city)
