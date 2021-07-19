@@ -5,6 +5,7 @@ import re
 import json
 import time
 import argparse
+import encodings.idna
 from threading import Thread, Lock
 from queue import Queue
 from urllib.parse import quote
@@ -417,4 +418,3 @@ if __name__ == "__main__":
     print("未去重的数据总数为:", len(all_pois))
     print("文件保存至", file_path)
     input("按下回车结束程序...")
-
