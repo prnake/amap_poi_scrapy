@@ -18,15 +18,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-v', '--verbose', help="打印更多的信息", action="store_true")
 parser.add_argument('-r', '--reset', help="忽略当前存在的配置信息", action="store_true")
 
-amap_key_lock = Lock()
-all_pois_lock = Lock()
-all_pois = []
-scrapy_id = []
-all_pois_count = 0
-all_pois_write_count = 0
-
-amap_pos_text_url = "https://restapi.amap.com/v3/place/text?key={}&keywords={}&city={}&citylimit=true&offset=25&page={}&output=json"
-amap_pos_poly_url = "https://restapi.amap.com/v3/place/polygon?key={}&keywords={}&polygon={}&citylimit=true&offset=25&page={}&output=json"
+amap_pos_text_url = "https://restapi.amap.com/v3/place/text?key={}&keywords={}&city={}&citylimit=true&extensions=all&offset=25&page={}&output=json"
+amap_pos_poly_url = "https://restapi.amap.com/v3/place/polygon?key={}&keywords={}&polygon={}&citylimit=true&extensions=all&offset=25&page={}&output=json"
 amap_district_url = "https://restapi.amap.com/v3/config/district?subdistrict=2&extensions=all&key={}"
 
 
@@ -128,7 +121,7 @@ def write_to_csv(poilist, file_name):
 
     df = pandas.DataFrame(data_csv)
 
-    file_path = 'data' + os.sep + file_name + os.sep + file_name + ".csv"
+    file_path = 'data'   + os.sep + file_name + ".csv"
 
     df.to_csv(file_path, index=False, encoding='utf_8_sig')
     return file_path
@@ -246,6 +239,7 @@ def queue_get_scrapy_list(q, scrapy_list,scrapy_list_lock):
             scrapy_list_lock.acquire()
             if pos_scrapy:
                 scrapy_list.extend(pos_scrapy)
+            # 这里还是把按区域搜索的部分添加上了，性价比不高的查漏
             scrapy_list.append([area, url, count])
             scrapy_list_lock.release()
         elif count > 0:
@@ -257,7 +251,7 @@ def get_scrapy_list():
     '''
     获取需要爬取的 url，采用地理区域 API 为主，多边形 API 辅助的方法
     '''
-    global keywords,types
+    global keywords
     area_list = []
     if "全国" in city:
         for province in area_code:
@@ -313,6 +307,16 @@ def queue_scrapy(q):
             print("当前进度:", f"{all_pois_write_count}/{all_pois_count}")
         all_pois_lock.release()
 
+def split_string(s):
+    '''
+    逗号分隔转数组
+    '''
+    if "，" in s:
+        s = s.split("，")
+    else:
+        s = s.split(",")
+    return list(filter(None, s))
+
 if __name__ == "__main__":
     args = parser.parse_args()
 
@@ -322,24 +326,16 @@ if __name__ == "__main__":
         print("配置创建中")
         config = {}
         config["thread_num"] = int(input("并发线程数（推荐5-10，高德个人开发者QPS为50）:"))
-        config["amap_web_key"] = input("高德开发者key，多个请用\",\"分隔:")
-        if "，" in config["amap_web_key"]:
-            config["amap_web_key"] = config["amap_web_key"].split("，")
-        else:
-            config["amap_web_key"] = config["amap_web_key"].split(",")
-        config["city"] = input("输入城市，多个请用\",\"分隔，完整查询请输入\"全国\":")
-        if "，" in config["city"]:
-            config["city"] = config["city"].split("，")
-        else:
-            config["city"] = config["city"].split(",")
-        url_type = int(input("基于关键词查询请输入0，基于POI分类编码查询请输入1:"))
-        if url_type == 0:
-            config["keywords"] = input(
-                "输入搜索关键词，多个请用\"|\"分隔，例如\"奶茶|咖啡\"用于查询所有的奶茶店和咖啡店:")
-        else:
-            print("基于POI分类编码查询,可输入分类代码或汉字")
-            print("若用汉字，请严格按照 amap_poicode.xlsx 之中的汉字填写")
-            config["types"] = input("输入分类代码或汉字:")
+        config["amap_web_key"] = split_string(input("高德开发者key，多个请用\",\"分隔:"))
+        config["city"] = split_string(input("输入城市，多个请用\",\"分隔，完整查询请输入\"全国\"或直接回车:"))
+        if not config["city"]:
+            config["city"] = ['全国']
+        print("配置基于关键词的查询，多个请用\",\"分隔，没有请直接回车")
+        print("例如\"奶茶,便利店\"会分别使用奶茶和便利店作为关键词搜索，生成两个查询文件")
+        config["keywords"] = split_string(input("输入搜索关键词:"))
+        print("配置基于POI分类编码查询,可输入分类代码或汉字，多个请用\",\"分隔，没有请直接回车")
+        print("若用汉字，请严格按照 amap_poicode.xlsx 中的名词填写")
+        config["types"] = split_string(input("输入分类代码或汉字:"))
         config["coord"] = int(
             input("选择输出数据坐标系,1为高德GCJ20坐标系，2WGS84坐标系，3百度BD09坐标系（推荐2）:"))
         with open("config.json", "w", encoding='utf-8') as f:
@@ -349,72 +345,96 @@ if __name__ == "__main__":
 
 
     with open("config.json", "r", encoding='utf-8') as f:
-            config = json.load(f)
+        config = json.load(f)
 
     thread_num = int(config["thread_num"])
     amap_web_key = config["amap_web_key"]
     city = config["city"]
-    if "keywords" in config:
-        keywords = config["keywords"]
-    elif "types" in config:
-        keywords = config["types"]
-        amap_pos_text_url = amap_pos_text_url.replace("keywords","types")
-        amap_pos_poly_url = amap_pos_poly_url.replace("keywords", "types")
     coord = int(config["coord"])
 
-    file_name = "-".join(keywords.split("|")) + '-' + "-".join(city)
-    folder_path = 'data' + os.sep + file_name + os.sep
-    if os.path.exists(folder_path) is False:
-        os.makedirs(folder_path)
+    # if "keywords" in config:
+    #     keywords = config["keywords"]
+    # elif "types" in config:
+    #     keywords = config["types"]
+    #     amap_pos_text_url = amap_pos_text_url.replace("keywords","types")
+    #     amap_pos_poly_url = amap_pos_poly_url.replace("keywords", "types")
 
     print("配置读取成功")
 
-    if os.path.exists(f"{folder_path}scrapy_list.json"):
-        if input(f"{folder_path}scrapy_list.json 文件存在，是否继续上一次查询(Y/N)?") != "Y":
-            get_scrapy_list()
-        else:
+    req_list = []
+    for key in config["keywords"]:
+        req_list.append([0,key,"".join(city)+f"-关键词-{key}"])
+    for key in config["types"]:
+        req_list.append([1,key,"".join(city)+f"-分类-{key}"])
+    print("即将进行以下查询:", ", ".join([i[2] for i in req_list]))
+    if input("请确认(Y/N)") != "Y":
+        exit()
+
+
+    for req_type,req_key,req_name in req_list:
+        print(f"开始获取 {req_name} 数据")
+        amap_key_lock = Lock()
+        all_pois_lock = Lock()
+        all_pois = []
+        scrapy_id = []
+        all_pois_count = 0
+        all_pois_write_count = 0
+
+        if req_type == 0:
+            keywords = req_key
+            amap_pos_text_url = amap_pos_text_url.replace("types","keywords")
+            amap_pos_poly_url = amap_pos_poly_url.replace("types","keywords")
+        elif req_type == 1:
+            keywords = req_key
+            amap_pos_text_url = amap_pos_text_url.replace("keywords","types")
+            amap_pos_poly_url = amap_pos_poly_url.replace("keywords","types")
+
+        file_name = req_name
+        folder_path = 'data' + os.sep + file_name + os.sep
+        if os.path.exists(folder_path) is False:
+            os.makedirs(folder_path)
+
+        if os.path.exists(f"{folder_path}scrapy_list.json"):
+            print(f"{folder_path}scrapy_list.json 文件存在，自动继续上一次查询")
             if os.path.exists(f"{folder_path}results.json"):
                 with open(f"{folder_path}results.json", "r", encoding='utf-8') as f:
                     all_pois = json.load(f)
             if os.path.exists(f"{folder_path}scrapy_id.json"):
                 with open(f"{folder_path}scrapy_id.json", "r", encoding='utf-8') as f:
                     scrapy_id = json.load(f)
-    else:
-        print("搜索需要爬取的url中，预计需要2分钟")
-        get_scrapy_list()
+        else:
+            print("搜索需要爬取的url中，预计需要2分钟")
+            get_scrapy_list()
 
-    print("查询的地区:", city)
-    print("查询的关键词:", keywords)
+        with open(f"{folder_path}scrapy_list.json", "r", encoding='utf-8') as f:
+            scrapy_list = json.load(f)
 
-    with open(f"{folder_path}scrapy_list.json", "r", encoding='utf-8') as f:
-        scrapy_list = json.load(f)
+        q = Queue()
 
-    q = Queue()
+        id, num_cnt, req_cnt = 0, 0, 0
+        for area, url, count in scrapy_list:
+            num_cnt += count
+            if id not in scrapy_id:
+                req_cnt += count//25
+                q.put([id,url])
+            id += 1
 
-    id, num_cnt, req_cnt = 0, 0, 0
-    for area, url, count in scrapy_list:
-        num_cnt += count
-        if id not in scrapy_id:
-            req_cnt += count//25
-            q.put([id,url])
-        id += 1
+        all_pois_count = q.qsize()
 
-    all_pois_count = q.qsize()
+        print("总数量约"+str(num_cnt), "预计请求"+str(req_cnt)+"次", "预计需要"+str(round(req_cnt/thread_num/60,1))+"分钟")
 
-    print("总数量约"+str(num_cnt), "预计请求"+str(req_cnt)+"次", "预计需要"+str(round(req_cnt/thread_num/60,1))+"分钟")
+        print("开始查询")
 
-    print("开始查询")
+        threads = [Thread(target=queue_scrapy, args=(q,))
+                   for _ in range(thread_num)]
 
-    threads = [Thread(target=queue_scrapy, args=(q,))
-               for _ in range(thread_num)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+        file_path = write_to_csv(all_pois, file_name)
 
-    file_path = write_to_csv(all_pois, file_name)
-
-    print("未去重的数据总数为:", len(all_pois))
-    print("文件保存至", file_path)
+        print("未去重的数据总数为:", len(all_pois))
+        print("文件保存至", file_path)
     input("按下回车结束程序...")
