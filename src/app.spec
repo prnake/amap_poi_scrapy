@@ -30,4 +30,4 @@ exe = EXE(pyz,
           disable_windowed_traceback=False,
           target_arch=None,
           codesign_identity=None,
-          entitlements_file=None , icon='forrst.ico')
+          entitlements_file=None , icon='pic.ico')
